@@ -18,22 +18,13 @@ public class MainView {
 
         model = new DefaultTableModel();
         JTable table = new JTable(model);
+        table.setDefaultRenderer(Object.class, new TableInfoRenderer());
 
         model.addColumn("Номер пакета");
         model.addColumn("Время");
         model.addColumn("Данные");
         model.addColumn("КС");
         model.addColumn("Проверка");
-
-        DefaultTableCellRenderer centerRenderer = new DefaultTableCellRenderer();
-        centerRenderer.setHorizontalAlignment(JLabel.CENTER);
-        table.getColumnModel().getColumn(4).setCellRenderer(centerRenderer);
-        DefaultTableCellRenderer rightRenderer = new DefaultTableCellRenderer();
-        rightRenderer.setHorizontalAlignment(JLabel.RIGHT);
-        table.getColumnModel().getColumn(0).setCellRenderer(rightRenderer);
-        table.getColumnModel().getColumn(1).setCellRenderer(rightRenderer);
-        table.getColumnModel().getColumn(2).setCellRenderer(rightRenderer);
-        table.getColumnModel().getColumn(3).setCellRenderer(rightRenderer);
 
         table.getColumnModel().getColumn(0).setPreferredWidth(20);
         table.getColumnModel().getColumn(1).setPreferredWidth(120);
@@ -50,5 +41,26 @@ public class MainView {
 
     public void addData(Long number, Instant timesec, Double serviceData, Integer intCRC, Boolean check) {
         model.addRow(new Object[]{number, timesec, serviceData, intCRC, check ? "ok" : "error"});
+    }
+}
+
+class TableInfoRenderer extends DefaultTableCellRenderer {
+    @Override
+    public Component getTableCellRendererComponent(JTable table, Object value,
+                                                   boolean isSelected, boolean hasFocus, int row, int column) {
+        JLabel c = (JLabel) super.getTableCellRendererComponent(table, value, isSelected, false, row, column);
+        if (column != 4) {
+            c.setHorizontalAlignment(RIGHT);
+        } else {
+            c.setHorizontalAlignment(CENTER);
+        }
+
+       if (value.equals("error")) {
+            c.setBackground(Color.red);
+        } else {
+            c.setBackground(Color.white);
+        }
+
+        return c;
     }
 }
