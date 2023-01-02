@@ -12,6 +12,7 @@ public class TLMClient {
 
     private static final int PORT = 15000;
     private static final long markerTLM = 0x12345678L;
+    private static final int DELAY = 20; // задержка в мс для эмуляции длительности вычислений
 
     public TLMClient() {
 
@@ -38,7 +39,6 @@ public class TLMClient {
                     }
 
                     if (containsData) {
-
                         System.arraycopy(buf, 0, commonBuffer, numberPackets * 25, packet.getLength());
                         System.out.print(numberPackets + " : ");
                         for (int i = numberPackets * 25; i < (numberPackets * 25) + packet.getLength(); i++) {
@@ -53,7 +53,7 @@ public class TLMClient {
                 Thread readThread = new Thread(() -> {
                     for (int i = 0; i < 26; i++) {
                         try {
-                            Thread.sleep(2 * 10);    // задержка для эмуляции длительных вычислений
+                            Thread.sleep(DELAY);
                         } catch (InterruptedException ie) {
                             Thread.currentThread().interrupt();
                         }
