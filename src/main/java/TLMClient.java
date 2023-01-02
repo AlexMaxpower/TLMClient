@@ -12,6 +12,7 @@ public class TLMClient {
 
     private static final int PORT = 15000;
     private static final long markerTLM = 0x12345678L;
+    private static final int DELAY = 20; // задержка в мс для эмуляции длительности вычислений
 
     public TLMClient() {
 
@@ -21,7 +22,6 @@ public class TLMClient {
 
             DatagramSocket data = new DatagramSocket(PORT);
             while (true) {
-
                 byte[] commonBuffer = new byte[651];
                 int numberPackets = 0;
 
@@ -39,7 +39,6 @@ public class TLMClient {
                     }
 
                     if (containsData) {
-
                         System.arraycopy(buf, 0, commonBuffer, numberPackets * 25, packet.getLength());
                         System.out.print(numberPackets + " : ");
                         for (int i = numberPackets * 25; i < (numberPackets * 25) + packet.getLength(); i++) {
@@ -51,44 +50,78 @@ public class TLMClient {
                 }
 
                 InputStream targetStream = new ByteArrayInputStream(commonBuffer);
+                Thread readThread = new Thread(() -> {
+                    for (int i = 0; i < 26; i++) {
+                        try {
+                            Thread.sleep(DELAY);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                        }
+                        byte[] forCRC = new byte[24];
 
-                for (int i = 0; i < 26; i++) {
+                        // маркер
+                        byte[] markerBytes;
+                        try {
+                            markerBytes = targetStream.readNBytes(4);
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                        System.arraycopy(markerBytes, 0, forCRC, 0, markerBytes.length);
+                        long marker = toUnsignedInt(reverse(markerBytes));
 
-                    byte[] forCRC = new byte[24];
+                        if (marker == markerTLM) {
+                            // номер пакета
+                            byte[] packageBytes;
+                            try {
+                                packageBytes = targetStream.readNBytes(4);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                            System.arraycopy(packageBytes, 0, forCRC, markerBytes.length, packageBytes.length);
+                            long numberTLMPackage = toUnsignedInt(reverse(packageBytes));
 
-                    // маркер
-                    byte[] markerBytes = targetStream.readNBytes(4);
-                    System.arraycopy(markerBytes, 0, forCRC, 0, markerBytes.length);
-                    long marker = toUnsignedInt(reverse(markerBytes));
+                            // время пакета
+                            byte[] timeBytes;
+                            try {
+                                timeBytes = targetStream.readNBytes(8);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                            System.arraycopy(timeBytes, 0, forCRC,
+                                    markerBytes.length + packageBytes.length, timeBytes.length);
+                            Double myDouble = ByteBuffer.wrap(reverse(timeBytes)).getDouble(0);
+                            long seconds = (long) myDouble.doubleValue();
+                            long milli = (long) ((myDouble.doubleValue() - seconds) * 1000);
+                            Instant timeSec = Instant.ofEpochMilli(seconds * 1000 + milli);
 
-                    if (marker == markerTLM) {
-                        // номер пакета
-                        byte[] packageBytes = targetStream.readNBytes(4);
-                        System.arraycopy(packageBytes, 0, forCRC, markerBytes.length, packageBytes.length);
-                        long numberTLMPackage = toUnsignedInt(reverse(packageBytes));
+                            // данные
+                            byte[] dataBytes;
+                            try {
+                                dataBytes = targetStream.readNBytes(8);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                            System.arraycopy(dataBytes, 0, forCRC,
+                                    markerBytes.length + packageBytes.length + dataBytes.length, dataBytes.length);
+                            Double serviceData = ByteBuffer.wrap(reverse(dataBytes)).getDouble(0);
 
-                        // время пакета
-                        byte[] timeBytes = targetStream.readNBytes(8);
-                        System.arraycopy(timeBytes, 0, forCRC,
-                                markerBytes.length + packageBytes.length, timeBytes.length);
-                        Double myDouble = ByteBuffer.wrap(reverse(timeBytes)).getDouble(0);
-                        long seconds = (long) myDouble.doubleValue();
-                        long milli = (long) ((myDouble.doubleValue() - seconds) * 1000);
-                        Instant timeSec = Instant.ofEpochMilli(seconds * 1000 + milli);
-
-                        // данные
-                        byte[] dataBytes = targetStream.readNBytes(8);
-                        System.arraycopy(dataBytes, 0, forCRC,
-                                markerBytes.length + packageBytes.length + dataBytes.length, dataBytes.length);
-                        Double serviceData = ByteBuffer.wrap(reverse(dataBytes)).getDouble(0);
-
-                        // контрольная сумма
-                        byte[] bytesCRC = targetStream.readNBytes(2);
-                        int intCRC = 0xFFFF & ByteBuffer.wrap(bytesCRC).order(ByteOrder.LITTLE_ENDIAN).getShort();
-                        int calcCRC = crc16(forCRC, 0, forCRC.length);
-                        view.addData(numberTLMPackage, timeSec, serviceData, calcCRC, intCRC == calcCRC);
+                            // контрольная сумма
+                            byte[] bytesCRC;
+                            try {
+                                bytesCRC = targetStream.readNBytes(2);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                            int intCRC = 0xFFFF & ByteBuffer.wrap(bytesCRC).order(ByteOrder.LITTLE_ENDIAN).getShort();
+                            int calcCRC = crc16(forCRC, 0, forCRC.length);
+                            view.addData(numberTLMPackage, timeSec, serviceData, calcCRC, intCRC == calcCRC);
+                        }
                     }
-                }
+                    System.out.println("Поток завершен!");
+                });
+                System.out.println("Поток запущен!");
+                readThread.start();
+                System.out.println("Идем дальше!");
             }
         } catch (IOException e) {
             e.printStackTrace();
