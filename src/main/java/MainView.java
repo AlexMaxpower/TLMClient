@@ -1,6 +1,7 @@
 import javax.swing.*;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.table.TableCellRenderer;
 import java.awt.*;
 import java.time.Instant;
 
@@ -17,7 +18,20 @@ public class MainView {
         frame.setLocationRelativeTo(null);
 
         model = new DefaultTableModel();
-        JTable table = new JTable(model);
+        JTable table = new JTable(model) {
+            public Component prepareRenderer(TableCellRenderer renderer, int row, int column) {
+                Component c = super.prepareRenderer(renderer, row, column);
+
+                if (!isRowSelected(row)) {
+                    c.setBackground(row % 2 == 0 ? getBackground() : Color.LIGHT_GRAY);
+                    int modelRow = convertRowIndexToModel(row);
+                    String type = (String) getModel().getValueAt(modelRow, 4);
+                    if ("error".equals(type)) c.setBackground(Color.PINK);
+                }
+
+                return c;
+            }
+        };
         table.setDefaultRenderer(Object.class, new TableInfoRenderer());
 
         model.addColumn("Номер пакета");
@@ -55,11 +69,11 @@ class TableInfoRenderer extends DefaultTableCellRenderer {
             c.setHorizontalAlignment(CENTER);
         }
 
-       if (value.equals("error")) {
+    /*    if (value.equals("error")) {
             c.setBackground(Color.red);
         } else {
             c.setBackground(Color.white);
-        }
+        } */
 
         return c;
     }
