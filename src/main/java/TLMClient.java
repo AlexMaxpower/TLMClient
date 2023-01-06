@@ -1,3 +1,4 @@
+import org.apache.poi.openxml4j.util.ZipSecureFile;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFFont;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -21,10 +22,11 @@ public class TLMClient {
     private static final int DELAY = 20; // задержка в мс для эмуляции длительности вычислений
     private static final String pFilename = LocalDateTime.now().toString().replaceAll("[:,.]", "")
             + ".xlsx";
+    private volatile MainView view;
 
     public TLMClient() {
 
-        MainView view = new MainView();
+        view = new MainView();
 
         try {
 
@@ -240,7 +242,7 @@ public class TLMClient {
         }
 
         try (BufferedInputStream fis = new BufferedInputStream(new FileInputStream(fileName))) {
-
+            ZipSecureFile.setMinInflateRatio(0);
             Workbook workbook = new XSSFWorkbook(fis);
             Sheet sheet = workbook.getSheetAt(0);
             int rowCount = sheet.getLastRowNum();
