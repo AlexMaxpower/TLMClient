@@ -1,3 +1,14 @@
+import javafx.application.Application;
+import javafx.concurrent.Service;
+import javafx.concurrent.Task;
+import javafx.scene.Scene;
+import javafx.scene.control.Label;
+import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableRow;
+import javafx.scene.control.TableView;
+import javafx.scene.control.cell.PropertyValueFactory;
+import javafx.scene.layout.VBox;
+import javafx.stage.Stage;
 import org.apache.poi.openxml4j.util.ZipSecureFile;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFFont;
@@ -15,22 +26,130 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 
-public class TLMClient {
+
+public class TLMClient extends Application {
 
     private static final int PORT = 15000;
+    private final static int WIDTH = 800;
+    private final static int HEIGHT = 600;
     private static final long markerTLM = 0x12345678L;
     private static final int DELAY = 20; // задержка в мс для эмуляции длительности вычислений
     private static final String pFilename = LocalDateTime.now().toString().replaceAll("[:,.]", "")
             + ".xlsx";
-    private volatile MainView view;
+    private volatile TableView tableView;
+    private Service<Void> service;
 
-    public TLMClient() {
+    public static void main(String[] args) {
+        launch();
+    }
 
-        view = new MainView();
+    @Override
+    public void start(Stage primaryStage) {
+        primaryStage.setTitle("TLMClient");
+        work(primaryStage);
+    }
 
-        try {
+    @Override
+    public void stop() throws Exception {
+        if (service != null) {
+            service.cancel();
+        }
+        super.stop();
+    }
 
-            DatagramSocket data = new DatagramSocket(PORT);
+    public void work(Stage primaryStage) {
+
+        tableView = new TableView();
+        tableView.setMinWidth(WIDTH);
+        tableView.setMinHeight(HEIGHT);
+
+        tableView.setPlaceholder(new Label("Ждем данные от сервера..."));
+
+        TableColumn<PackageData, Long> column1 =
+                new TableColumn<>("Номер пакета");
+
+        column1.setCellValueFactory(
+                new PropertyValueFactory<>("number"));
+
+        TableColumn<PackageData, Instant> column2 =
+                new TableColumn<>("Время");
+
+        column2.setCellValueFactory(
+                new PropertyValueFactory<>("timeSec"));
+
+        TableColumn<PackageData, Double> column3 =
+                new TableColumn<>("Данные");
+
+        column3.setCellValueFactory(
+                new PropertyValueFactory<>("serviceData"));
+
+        TableColumn<PackageData, Integer> column4 =
+                new TableColumn<>("КС");
+
+        column4.setCellValueFactory(
+                new PropertyValueFactory<>("intCRC"));
+
+        TableColumn<PackageData, Boolean> column5 =
+                new TableColumn<>("Проверка");
+
+        column5.setCellValueFactory(
+                new PropertyValueFactory<>("check"));
+
+        column1.setStyle("-fx-alignment: CENTER-RIGHT;");
+        column2.setStyle("-fx-alignment: CENTER;");
+        column3.setStyle("-fx-alignment: CENTER-RIGHT;");
+        column4.setStyle("-fx-alignment: CENTER;");
+        column5.setStyle("-fx-alignment: CENTER;");
+
+        tableView.getColumns().add(column1);
+        tableView.getColumns().add(column2);
+        tableView.getColumns().add(column3);
+        tableView.getColumns().add(column4);
+        tableView.getColumns().add(column5);
+
+        column1.prefWidthProperty().bind(tableView.widthProperty().multiply(0.2));
+        column2.prefWidthProperty().bind(tableView.widthProperty().multiply(0.25));
+        column3.prefWidthProperty().bind(tableView.widthProperty().multiply(0.25));
+        column4.prefWidthProperty().bind(tableView.widthProperty().multiply(0.15));
+        column5.prefWidthProperty().bind(tableView.widthProperty().multiply(0.15));
+
+        tableView.setRowFactory(tv -> new TableRow<PackageData>() {
+            @Override
+            public void updateItem(PackageData item, boolean empty) {
+                super.updateItem(item, empty);
+                if (item == null) {
+                    setStyle("");
+                } else if (item.getCheck().equals("error")) {
+                    setStyle("-fx-background-color: lightpink;");
+                } else {
+                    setStyle("");
+                }
+            }
+        });
+
+        VBox vbox = new VBox(tableView);
+        primaryStage.setScene(new Scene(vbox));
+
+        service = new Service<>() {
+            @Override
+            protected Task<Void> createTask() {
+                return new Task<>() {
+                    @Override
+                    protected Void call() {
+                        readData(tableView);
+                        return null;
+                    }
+                };
+            }
+        };
+
+        service.start();
+        primaryStage.show();
+    }
+
+    private void readData(TableView tableView) {
+        try (DatagramSocket data = new DatagramSocket(PORT)) {
+
             while (true) {
                 byte[] commonBuffer = new byte[651];
                 int numberPackets = 0;
@@ -124,7 +243,12 @@ public class TLMClient {
                             }
                             int intCRC = 0xFFFF & ByteBuffer.wrap(bytesCRC).order(ByteOrder.LITTLE_ENDIAN).getShort();
                             int calcCRC = crc16(forCRC, 0, forCRC.length);
-                            view.addData(numberTLMPackage, timeSec, serviceData, calcCRC, intCRC == calcCRC);
+                            tableView.getItems().add(new PackageData(
+                                    numberTLMPackage,
+                                    timeSec,
+                                    serviceData,
+                                    intCRC,
+                                    intCRC == calcCRC ? "ok" : "error"));
 
                             // пишем в файл только верные данные
                             if (intCRC == calcCRC) {
@@ -136,16 +260,15 @@ public class TLMClient {
                             }
                         }
                     }
-                    System.out.println("Поток " + Thread.currentThread().getName() + " завершен!");
+                    System.out.println(Thread.currentThread().getName() + " completed!");
                 });
-                System.out.println("Поток " + readThread.getName() + " запущен!");
                 readThread.start();
-                System.out.println("Идем дальше из основного потока - " + Thread.currentThread().getName());
+                System.out.println(readThread.getName() + " started!");
+                System.out.println("Now in main thread: " + Thread.currentThread().getName());
             }
         } catch (IOException e) {
             e.printStackTrace();
         }
-
     }
 
     public static byte[] fromUnsignedInt(long value) {
@@ -168,7 +291,7 @@ public class TLMClient {
         return sb.toString();
     }
 
-    private byte[] reverse(byte[] bytes) {
+    private static byte[] reverse(byte[] bytes) {
         for (int i = 0; i < bytes.length / 2; i++) {
             byte tmp = bytes[i];
             bytes[i] = bytes[bytes.length - i - 1];
