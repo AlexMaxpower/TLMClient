@@ -1,16 +1,16 @@
 import javafx.application.Application;
 import javafx.concurrent.Service;
 import javafx.concurrent.Task;
+import javafx.geometry.Pos;
 import javafx.scene.Scene;
-import javafx.scene.control.Label;
-import javafx.scene.control.TableColumn;
-import javafx.scene.control.TableRow;
-import javafx.scene.control.TableView;
+import javafx.scene.control.*;
 import javafx.scene.control.cell.PropertyValueFactory;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 import org.apache.poi.openxml4j.util.ZipSecureFile;
 import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.xssf.usermodel.XSSFFont;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
@@ -33,7 +33,7 @@ public class TLMClient extends Application {
     private final static int WIDTH = 800;
     private final static int HEIGHT = 600;
     private static final long markerTLM = 0x12345678L;
-    private static final int DELAY = 20; // задержка в мс для эмуляции длительности вычислений
+    private static int delay = 20; // задержка в мс для эмуляции длительности вычислений по умолчанию
     private static final String pFilename = LocalDateTime.now().toString().replaceAll("[:,.]", "")
             + ".xlsx";
     private volatile TableView tableView;
@@ -59,9 +59,27 @@ public class TLMClient extends Application {
 
     public void work(Stage primaryStage) {
 
+        Label delayLabel = new Label();
+        delayLabel.setText("Задержка в потоке, мс ");
+        TextField textField = new TextField();
+        textField.setPrefColumnCount(10);
+        textField.setText(Integer.toString(delay));
+        // в поле только цифры
+        textField.textProperty().addListener((observable, oldValue, newValue) -> {
+            if (!newValue.matches("\\d*")) {
+                textField.setText(newValue.replaceAll("[^\\d]", ""));
+            }
+        });
+
+        Button delayButton = new Button("Применить");
+        delayButton.setOnAction(event ->
+                delay = Integer.parseInt(textField.getText()));
+        HBox hbox = new HBox(0, delayLabel, textField, delayButton);
+        hbox.setAlignment(Pos.CENTER_RIGHT);
+
         tableView = new TableView();
         tableView.setMinWidth(WIDTH);
-        tableView.setMinHeight(HEIGHT);
+        tableView.setMinHeight(HEIGHT - 50);
 
         tableView.setPlaceholder(new Label("Ждем данные от сервера..."));
 
@@ -89,7 +107,7 @@ public class TLMClient extends Application {
         column4.setCellValueFactory(
                 new PropertyValueFactory<>("intCRC"));
 
-        TableColumn<PackageData, Boolean> column5 =
+        TableColumn<PackageData, String> column5 =
                 new TableColumn<>("Проверка");
 
         column5.setCellValueFactory(
@@ -127,8 +145,8 @@ public class TLMClient extends Application {
             }
         });
 
-        VBox vbox = new VBox(tableView);
-        primaryStage.setScene(new Scene(vbox));
+        VBox vbox = new VBox(hbox, tableView);
+        primaryStage.setScene(new Scene(vbox, WIDTH, HEIGHT));
 
         service = new Service<>() {
             @Override
@@ -182,7 +200,7 @@ public class TLMClient extends Application {
                 Thread readThread = new Thread(() -> {
                     for (int i = 0; i < 26; i++) {
                         try {
-                            Thread.sleep(DELAY);
+                            Thread.sleep(delay);
                         } catch (InterruptedException ie) {
                             Thread.currentThread().interrupt();
                         }
