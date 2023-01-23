@@ -24,6 +24,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 
 
@@ -38,6 +39,9 @@ public class TLMClient extends Application {
             + ".xlsx";
     private volatile TableView tableView;
     private Service<Void> service;
+    private Stage secondStage;
+
+    DateTimeFormatter customFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
 
     public static void main(String[] args) {
         launch();
@@ -47,6 +51,13 @@ public class TLMClient extends Application {
     public void start(Stage primaryStage) {
         primaryStage.setTitle("TLMClient");
         work(primaryStage);
+        secondStage = new Stage();
+        Label label = new Label(LocalDateTime.now().format(customFormat) + " Delay: " + delay + " ms");
+        label.setId("delay");
+        HBox hbox = new HBox(10, label);
+        hbox.setAlignment(Pos.TOP_LEFT);
+        secondStage.setScene(new Scene(hbox, 400, 200));
+        secondStage.show();
     }
 
     @Override
@@ -72,8 +83,11 @@ public class TLMClient extends Application {
         });
 
         Button delayButton = new Button("Применить");
-        delayButton.setOnAction(event ->
-                delay = Integer.parseInt(textField.getText()));
+        delayButton.setOnAction(event -> {
+            delay = Integer.parseInt(textField.getText());
+            Label lbl = (Label) secondStage.getScene().lookup("#delay");
+            lbl.setText(lbl.getText() + "\n" + LocalDateTime.now().format(customFormat) + " Delay: " + delay + " ms");
+        });
         HBox hbox = new HBox(0, delayLabel, textField, delayButton);
         hbox.setAlignment(Pos.CENTER_RIGHT);
 
