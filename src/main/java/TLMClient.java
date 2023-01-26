@@ -1,16 +1,28 @@
 import javafx.application.Application;
+import javafx.application.Platform;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
+import javafx.collections.transformation.SortedList;
 import javafx.concurrent.Service;
 import javafx.concurrent.Task;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
+import javafx.scene.chart.CategoryAxis;
+import javafx.scene.chart.LineChart;
+import javafx.scene.chart.NumberAxis;
+import javafx.scene.chart.XYChart;
 import javafx.scene.control.*;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
+import javafx.scene.paint.Color;
+import javafx.scene.text.Text;
+import javafx.scene.text.TextFlow;
 import javafx.stage.Stage;
+import javafx.stage.WindowEvent;
 import org.apache.poi.openxml4j.util.ZipSecureFile;
-import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFFont;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
@@ -24,8 +36,11 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.Optional;
 
 
 public class TLMClient extends Application {
@@ -34,14 +49,23 @@ public class TLMClient extends Application {
     private final static int WIDTH = 800;
     private final static int HEIGHT = 600;
     private static final long markerTLM = 0x12345678L;
-    private static int delay = 20; // задержка в мс для эмуляции длительности вычислений по умолчанию
+    final int POINTS_SIZE = 50;   // кол-во точек на графике
+    private static int delay = 5; // задержка в мс для эмуляции длительности вычислений по умолчанию
     private static final String pFilename = LocalDateTime.now().toString().replaceAll("[:,.]", "")
             + ".xlsx";
     private volatile TableView tableView;
     private Service<Void> service;
-    private Stage secondStage;
+    private Stage primaryStage;
+    private Stage logStage;
+    private Stage chartStage;
+    private volatile XYChart.Series<String, Number> series;
+    private ObservableList<XYChart.Data<String, Number>> dataTime = FXCollections.observableArrayList();
+    private SortedList<XYChart.Data<String, Number>> sortedData = new SortedList<>(dataTime,
+            Comparator.comparing(XYChart.Data::getXValue));
+    private int threads = 0;
+    private int currentThreads = 0;
 
-    DateTimeFormatter customFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
+    private DateTimeFormatter customFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
 
     public static void main(String[] args) {
         launch();
@@ -49,15 +73,45 @@ public class TLMClient extends Application {
 
     @Override
     public void start(Stage primaryStage) {
-        primaryStage.setTitle("TLMClient");
-        work(primaryStage);
-        secondStage = new Stage();
-        Label label = new Label(LocalDateTime.now().format(customFormat) + " Delay: " + delay + " ms");
-        label.setId("delay");
-        HBox hbox = new HBox(10, label);
+
+        this.primaryStage = primaryStage;
+        work();
+        logStage = new Stage();
+        TextFlow logView = new TextFlow(new Text("  " + LocalDateTime.now().format(customFormat) + "  Delay: " +
+                delay + " ms"));
+        logView.setId("logString");
+        logView.setPrefWidth(400);
+        ScrollPane scrollPane = new ScrollPane(logView);
+        HBox hbox = new HBox(10, scrollPane);
         hbox.setAlignment(Pos.TOP_LEFT);
-        secondStage.setScene(new Scene(hbox, 400, 200));
-        secondStage.show();
+        logStage.setScene(new Scene(hbox, 400, 200));
+        logStage.setX(WIDTH + 80);
+        logStage.setY(20);
+        logStage.setTitle("Log");
+        logStage.show();
+
+        chartStage = new Stage();
+        chartStage.setTitle("Realtime Chart");
+        chartStage.setX(WIDTH + 80);
+        chartStage.setY(260);
+        final CategoryAxis xAxis = new CategoryAxis();
+        final NumberAxis yAxis = new NumberAxis();
+        xAxis.setLabel("Time,s");
+        xAxis.setAnimated(false);
+        yAxis.setLabel("Value");
+        yAxis.setAnimated(false);
+
+        final LineChart<String, Number> lineChart = new LineChart<>(xAxis, yAxis);
+        lineChart.setTitle("Данные по UDP");
+        lineChart.setAnimated(false);
+
+        series = new XYChart.Series<>(sortedData);
+        series.setName("Service data");
+        lineChart.getData().add(series);
+        lineChart.setLegendVisible(false);
+
+        chartStage.setScene(new Scene(lineChart, 400, 360));
+        chartStage.show();
     }
 
     @Override
@@ -68,7 +122,7 @@ public class TLMClient extends Application {
         super.stop();
     }
 
-    public void work(Stage primaryStage) {
+    public void work() {
 
         Label delayLabel = new Label();
         delayLabel.setText("Задержка в потоке, мс ");
@@ -85,8 +139,9 @@ public class TLMClient extends Application {
         Button delayButton = new Button("Применить");
         delayButton.setOnAction(event -> {
             delay = Integer.parseInt(textField.getText());
-            Label lbl = (Label) secondStage.getScene().lookup("#delay");
-            lbl.setText(lbl.getText() + "\n" + LocalDateTime.now().format(customFormat) + " Delay: " + delay + " ms");
+            TextFlow logView = (TextFlow) logStage.getScene().lookup("#logString");
+            logView.getChildren().add(new Text("\n  " + LocalDateTime.now().format(customFormat) +
+                    "  Delay: " + delay + " ms"));
         });
         HBox hbox = new HBox(0, delayLabel, textField, delayButton);
         hbox.setAlignment(Pos.CENTER_RIGHT);
@@ -139,6 +194,9 @@ public class TLMClient extends Application {
         tableView.getColumns().add(column4);
         tableView.getColumns().add(column5);
 
+        column1.setSortType(TableColumn.SortType.ASCENDING);
+        tableView.getSortOrder().add(column1);
+
         column1.prefWidthProperty().bind(tableView.widthProperty().multiply(0.2));
         column2.prefWidthProperty().bind(tableView.widthProperty().multiply(0.25));
         column3.prefWidthProperty().bind(tableView.widthProperty().multiply(0.25));
@@ -176,7 +234,32 @@ public class TLMClient extends Application {
         };
 
         service.start();
+        primaryStage.setX(60);
+        primaryStage.setY(20);
+        primaryStage.setTitle("TLMClient");
+        primaryStage.getScene().getWindow().addEventFilter(WindowEvent.WINDOW_CLOSE_REQUEST, this::closeWindowEvent);
         primaryStage.show();
+    }
+
+    private void closeWindowEvent(WindowEvent event) {
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        ButtonType buttonYes = new ButtonType("Да");
+        ButtonType buttonCancel = new ButtonType("Отмена");
+        alert.getButtonTypes().setAll(buttonYes, buttonCancel);
+        alert.setHeaderText("Подтвердите действие");
+        alert.setTitle("Завершение работы");
+        alert.setContentText(String.format("Вы действительно закрыть приложение?"));
+        alert.initOwner(primaryStage.getOwner());
+        Optional<ButtonType> res = alert.showAndWait();
+
+        if (res.isPresent()) {
+            if (res.get().equals(buttonYes)) {
+                chartStage.close();
+                logStage.close();
+            } else {
+                event.consume();
+            }
+        }
     }
 
     private void readData(TableView tableView) {
@@ -275,15 +358,28 @@ public class TLMClient extends Application {
                             }
                             int intCRC = 0xFFFF & ByteBuffer.wrap(bytesCRC).order(ByteOrder.LITTLE_ENDIAN).getShort();
                             int calcCRC = crc16(forCRC, 0, forCRC.length);
-                            tableView.getItems().add(new PackageData(
-                                    numberTLMPackage,
-                                    timeSec,
-                                    serviceData,
-                                    intCRC,
-                                    intCRC == calcCRC ? "ok" : "error"));
+                            Platform.runLater(() -> {
+                                tableView.getItems().add(new PackageData(
+                                        numberTLMPackage,
+                                        timeSec,
+                                        serviceData,
+                                        intCRC,
+                                        intCRC == calcCRC ? "ok" : "error"));
+                                tableView.sort();
+                            });
 
-                            // пишем в файл только верные данные
+                            // пишем в файл и на график только верные данные
                             if (intCRC == calcCRC) {
+                                Platform.runLater(() -> {
+                                    String formattedDate = customFormat.format(LocalDateTime.ofInstant(timeSec,
+                                            ZoneOffset.UTC));
+                                    addData(dataTime, formattedDate, serviceData);
+
+                                    if (series.getData().size() > POINTS_SIZE) {
+                                        dataTime.remove(0);
+                                    }
+                                });
+
                                 try {
                                     writeToXLS(numberTLMPackage, timeSec, serviceData, calcCRC);
                                 } catch (IOException e) {
@@ -293,8 +389,22 @@ public class TLMClient extends Application {
                         }
                     }
                     System.out.println(Thread.currentThread().getName() + " completed!");
+                    threads--;
                 });
                 readThread.start();
+                threads++;
+                if (currentThreads != threads) {
+                    Color color = currentThreads > threads ? Color.GREEN : Color.TOMATO;
+                    currentThreads = threads;
+                    Platform.runLater(() -> {
+                        TextFlow textFlow = (TextFlow) logStage.getScene().lookup("#logString");
+                        Text text = new Text("\n  " + LocalDateTime.now().format(customFormat) +
+                                " Threads: " + currentThreads);
+                        text.setFill(color);
+                        textFlow.getChildren().add(text);
+                    });
+
+                }
                 System.out.println(readThread.getName() + " started!");
                 System.out.println("Now in main thread: " + Thread.currentThread().getName());
             }
@@ -302,6 +412,19 @@ public class TLMClient extends Application {
             e.printStackTrace();
         }
     }
+
+    private void addData(ObservableList<XYChart.Data<String, Number>> dataTime, String formattedDate, double value) {
+        XYChart.Data<String, Number> dataAtDate = dataTime.stream()
+                .filter(d -> d.getXValue().equals(formattedDate))
+                .findAny()
+                .orElseGet(() -> {
+                    XYChart.Data<String, Number> newData = new XYChart.Data<>(formattedDate, 0.0);
+                    dataTime.add(newData);
+                    return newData;
+                });
+        dataAtDate.setYValue(dataAtDate.getYValue().doubleValue() + value);
+    }
+
 
     public static byte[] fromUnsignedInt(long value) {
         byte[] bytes = new byte[8];
