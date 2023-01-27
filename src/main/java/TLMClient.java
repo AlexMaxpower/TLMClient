@@ -38,9 +38,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.Optional;
+import java.util.*;
 
 
 public class TLMClient extends Application {
@@ -263,157 +261,187 @@ public class TLMClient extends Application {
     }
 
     private void readData(TableView tableView) {
+        Queue<Byte> queue = new LinkedList<>();
+        byte[] marker = fromUnsignedInt(markerTLM);
+
         try (DatagramSocket data = new DatagramSocket(PORT)) {
+            int numberPackets = 0;
 
             while (true) {
-                byte[] commonBuffer = new byte[651];
-                int numberPackets = 0;
+                byte[] commonBuffer = new byte[26];
 
-                while (numberPackets < 26) {
-                    byte[] buf = new byte[256];
-                    DatagramPacket packet = new DatagramPacket(buf, buf.length);
-                    data.receive(packet);
-                    buf = packet.getData();
+                byte[] buf = new byte[256];
+                DatagramPacket packet = new DatagramPacket(buf, buf.length);
+                data.receive(packet);
+                buf = packet.getData();
 
-                    boolean containsData = false;
-                    for (int i = 0; i < packet.getLength(); i++) {
-                        if (buf[i] != 0) {
-                            containsData = true;
-                        }
-                    }
-
-                    if (containsData) {
-                        System.arraycopy(buf, 0, commonBuffer, numberPackets * 25, packet.getLength());
-                        System.out.print(numberPackets + " : ");
-                        for (int i = numberPackets * 25; i < (numberPackets * 25) + packet.getLength(); i++) {
-                            System.out.print(commonBuffer[i] + " ");
-                        }
-                        System.out.println();
-                        numberPackets += 1;
+                boolean containsData = false;
+                for (int i = 0; i < packet.getLength(); i++) {
+                    if (buf[i] != 0) {
+                        containsData = true;
+                        break;
                     }
                 }
 
-                InputStream targetStream = new ByteArrayInputStream(commonBuffer);
-                Thread readThread = new Thread(() -> {
-                    for (int i = 0; i < 26; i++) {
-                        try {
-                            Thread.sleep(delay);
-                        } catch (InterruptedException ie) {
-                            Thread.currentThread().interrupt();
-                        }
-                        byte[] forCRC = new byte[24];
+                if (containsData) {
+                    for (int i = 0; i < packet.getLength(); i++) {
+                        queue.add(buf[i]);
+                    }
+                }
 
-                        // маркер
-                        byte[] markerBytes;
-                        try {
-                            markerBytes = targetStream.readNBytes(4);
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
-                        System.arraycopy(markerBytes, 0, forCRC, 0, markerBytes.length);
-                        long marker = toUnsignedInt(reverse(markerBytes));
-
-                        if (marker == markerTLM) {
-                            // номер пакета
-                            byte[] packageBytes;
-                            try {
-                                packageBytes = targetStream.readNBytes(4);
-                            } catch (IOException e) {
-                                throw new RuntimeException(e);
-                            }
-                            System.arraycopy(packageBytes, 0, forCRC, markerBytes.length, packageBytes.length);
-                            long numberTLMPackage = toUnsignedInt(reverse(packageBytes));
-
-                            // время пакета
-                            byte[] timeBytes;
-                            try {
-                                timeBytes = targetStream.readNBytes(8);
-                            } catch (IOException e) {
-                                throw new RuntimeException(e);
-                            }
-                            System.arraycopy(timeBytes, 0, forCRC,
-                                    markerBytes.length + packageBytes.length, timeBytes.length);
-                            Double myDouble = ByteBuffer.wrap(reverse(timeBytes)).getDouble(0);
-                            long seconds = (long) myDouble.doubleValue();
-                            long milli = (long) ((myDouble.doubleValue() - seconds) * 1000);
-                            Instant timeSec = Instant.ofEpochMilli(seconds * 1000 + milli);
-
-                            // данные
-                            byte[] dataBytes;
-                            try {
-                                dataBytes = targetStream.readNBytes(8);
-                            } catch (IOException e) {
-                                throw new RuntimeException(e);
-                            }
-                            System.arraycopy(dataBytes, 0, forCRC,
-                                    markerBytes.length + packageBytes.length + dataBytes.length, dataBytes.length);
-                            Double serviceData = ByteBuffer.wrap(reverse(dataBytes)).getDouble(0);
-
-                            // контрольная сумма
-                            byte[] bytesCRC;
-                            try {
-                                bytesCRC = targetStream.readNBytes(2);
-                            } catch (IOException e) {
-                                throw new RuntimeException(e);
-                            }
-                            int intCRC = 0xFFFF & ByteBuffer.wrap(bytesCRC).order(ByteOrder.LITTLE_ENDIAN).getShort();
-                            int calcCRC = crc16(forCRC, 0, forCRC.length);
-                            Platform.runLater(() -> {
-                                tableView.getItems().add(new PackageData(
-                                        numberTLMPackage,
-                                        timeSec,
-                                        serviceData,
-                                        intCRC,
-                                        intCRC == calcCRC ? "ok" : "error"));
-                                tableView.sort();
-                            });
-
-                            // пишем в файл и на график только верные данные
-                            if (intCRC == calcCRC) {
-                                Platform.runLater(() -> {
-                                    String formattedDate = customFormat.format(LocalDateTime.ofInstant(timeSec,
-                                            ZoneOffset.UTC));
-                                    addData(dataTime, formattedDate, serviceData);
-
-                                    if (series.getData().size() > POINTS_SIZE) {
-                                        dataTime.remove(0);
+                while (queue.size() >= 26) {
+                    Byte readByte = queue.remove();
+                    if (Byte.valueOf(marker[3]).equals(readByte)) {
+                        Byte readSecond = queue.peek();
+                        if (Byte.valueOf(marker[2]).equals(readSecond)) {
+                            queue.remove();
+                            Byte readThird = queue.peek();
+                            if (Byte.valueOf(marker[1]).equals(readThird)) {
+                                queue.remove();
+                                Byte readFour = queue.peek();
+                                if (Byte.valueOf(marker[0]).equals(readFour)) {
+                                    queue.remove();
+                                    numberPackets++;
+                                    System.out.print(numberPackets + " : ");
+                                    commonBuffer[0] = readByte;
+                                    commonBuffer[1] = readSecond;
+                                    commonBuffer[2] = readThird;
+                                    commonBuffer[3] = readFour;
+                                    for (int i = 4; i < 26; i++) {
+                                        commonBuffer[i] = queue.remove();
+                                        System.out.print(commonBuffer[i] + " ");
                                     }
-                                });
+                                    System.out.println();
+                                    InputStream targetStream = new ByteArrayInputStream(commonBuffer);
+                                    Thread readThread = new Thread(() -> {
 
-                                try {
-                                    writeToXLS(numberTLMPackage, timeSec, serviceData, calcCRC);
-                                } catch (IOException e) {
-                                    throw new RuntimeException(e);
+                                        try {
+                                            Thread.sleep(delay);
+                                        } catch (InterruptedException ie) {
+                                            Thread.currentThread().interrupt();
+                                        }
+                                        byte[] forCRC = new byte[24];
+
+                                        // маркер
+                                        byte[] markerBytes;
+                                        try {
+                                            markerBytes = targetStream.readNBytes(4);
+                                        } catch (IOException e) {
+                                            throw new RuntimeException(e);
+                                        }
+                                        System.arraycopy(markerBytes, 0, forCRC, 0, markerBytes.length);
+                                        // номер пакета
+                                        byte[] packageBytes;
+                                        try {
+                                            packageBytes = targetStream.readNBytes(4);
+                                        } catch (IOException e) {
+                                            throw new RuntimeException(e);
+                                        }
+                                        System.arraycopy(packageBytes, 0, forCRC, markerBytes.length,
+                                                packageBytes.length);
+                                        long numberTLMPackage = toUnsignedInt(reverse(packageBytes));
+
+                                        // время пакета
+                                        byte[] timeBytes;
+                                        try {
+                                            timeBytes = targetStream.readNBytes(8);
+                                        } catch (IOException e) {
+                                            throw new RuntimeException(e);
+                                        }
+                                        System.arraycopy(timeBytes, 0, forCRC,
+                                                markerBytes.length + packageBytes.length, timeBytes.length);
+                                        Double myDouble = ByteBuffer.wrap(reverse(timeBytes)).getDouble(0);
+                                        long seconds = (long) myDouble.doubleValue();
+                                        long milli = (long) ((myDouble.doubleValue() - seconds) * 1000);
+                                        Instant timeSec = Instant.ofEpochMilli(seconds * 1000 + milli);
+
+                                        // данные
+                                        byte[] dataBytes;
+                                        try {
+                                            dataBytes = targetStream.readNBytes(8);
+                                        } catch (IOException e) {
+                                            throw new RuntimeException(e);
+                                        }
+                                        System.arraycopy(dataBytes, 0, forCRC,
+                                                markerBytes.length + packageBytes.length + dataBytes.length,
+                                                dataBytes.length);
+                                        Double serviceData = ByteBuffer.wrap(reverse(dataBytes)).getDouble(0);
+
+                                        // контрольная сумма
+                                        byte[] bytesCRC;
+                                        try {
+                                            bytesCRC = targetStream.readNBytes(2);
+                                        } catch (IOException e) {
+                                            throw new RuntimeException(e);
+                                        }
+                                        int intCRC = 0xFFFF &
+                                                ByteBuffer.wrap(bytesCRC).order(ByteOrder.LITTLE_ENDIAN).getShort();
+                                        int calcCRC = crc16(forCRC, 0, forCRC.length);
+                                        Platform.runLater(() -> {
+                                            tableView.getItems().add(new PackageData(
+                                                    numberTLMPackage,
+                                                    timeSec,
+                                                    serviceData,
+                                                    intCRC,
+                                                    intCRC == calcCRC ? "ok" : "error"));
+                                            tableView.sort();
+                                        });
+
+                                        // пишем в файл и на график только верные данные
+                                        if (intCRC == calcCRC) {
+                                            Platform.runLater(() -> {
+                                                String formattedDate =
+                                                        customFormat.format(LocalDateTime.ofInstant(timeSec,
+                                                                ZoneOffset.UTC));
+                                                addData(dataTime, formattedDate, serviceData);
+
+                                                if (series.getData().size() > POINTS_SIZE) {
+                                                    dataTime.remove(0);
+                                                }
+                                            });
+
+                                            try {
+                                                writeToXLS(numberTLMPackage, timeSec, serviceData, calcCRC);
+                                            } catch (IOException e) {
+                                                throw new RuntimeException(e);
+                                            }
+                                        }
+
+                                        System.out.println(Thread.currentThread().getName() + " completed!");
+                                        threads--;
+                                    });
+                                    readThread.start();
+                                    threads++;
+                                    if (currentThreads != threads) {
+                                        Color color = currentThreads > threads ? Color.GREEN : Color.TOMATO;
+                                        currentThreads = threads;
+                                        Platform.runLater(() -> {
+                                            TextFlow textFlow = (TextFlow) logStage.getScene().lookup("#logString");
+                                            Text text = new Text("\n  " + LocalDateTime.now().format(customFormat) +
+                                                    " Threads: " + currentThreads);
+                                            text.setFill(color);
+                                            textFlow.getChildren().add(text);
+                                        });
+
+                                    }
+                                    System.out.println(readThread.getName() + " started!");
+                                    System.out.println("Now in main thread: " + Thread.currentThread().getName());
                                 }
                             }
                         }
                     }
-                    System.out.println(Thread.currentThread().getName() + " completed!");
-                    threads--;
-                });
-                readThread.start();
-                threads++;
-                if (currentThreads != threads) {
-                    Color color = currentThreads > threads ? Color.GREEN : Color.TOMATO;
-                    currentThreads = threads;
-                    Platform.runLater(() -> {
-                        TextFlow textFlow = (TextFlow) logStage.getScene().lookup("#logString");
-                        Text text = new Text("\n  " + LocalDateTime.now().format(customFormat) +
-                                " Threads: " + currentThreads);
-                        text.setFill(color);
-                        textFlow.getChildren().add(text);
-                    });
-
                 }
-                System.out.println(readThread.getName() + " started!");
-                System.out.println("Now in main thread: " + Thread.currentThread().getName());
             }
-        } catch (IOException e) {
+
+        } catch (
+                IOException e) {
             e.printStackTrace();
         }
+
     }
 
-    private void addData(ObservableList<XYChart.Data<String, Number>> dataTime, String formattedDate, double value) {
+    private void addData(ObservableList<XYChart.Data<String, Number>> dataTime, String formattedDate,
+                         double value) {
         XYChart.Data<String, Number> dataAtDate = dataTime.stream()
                 .filter(d -> d.getXValue().equals(formattedDate))
                 .findAny()
