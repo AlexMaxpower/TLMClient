@@ -5,6 +5,7 @@ import javafx.collections.ObservableList;
 import javafx.collections.transformation.SortedList;
 import javafx.concurrent.Service;
 import javafx.concurrent.Task;
+import javafx.geometry.HPos;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.chart.CategoryAxis;
@@ -13,7 +14,9 @@ import javafx.scene.chart.NumberAxis;
 import javafx.scene.chart.XYChart;
 import javafx.scene.control.*;
 import javafx.scene.control.cell.PropertyValueFactory;
+import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Text;
@@ -47,6 +50,7 @@ public class TLMClient extends Application {
     private final static int WIDTH = 800;
     private final static int HEIGHT = 600;
     private static final long markerTLM = 0x12345678L;
+    byte[] marker = fromUnsignedInt(markerTLM);
     final int POINTS_SIZE = 50;   // кол-во точек на графике
     private static int delay = 5; // задержка в мс для эмуляции длительности вычислений по умолчанию
     private static final String pFilename = LocalDateTime.now().toString().replaceAll("[:,.]", "")
@@ -122,6 +126,28 @@ public class TLMClient extends Application {
 
     public void work() {
 
+        service = new Service<>() {
+            @Override
+            protected Task<Void> createTask() {
+                return new Task<>() {
+                    @Override
+                    protected Void call() {
+                        Queue<Byte> queue = new LinkedList<>();
+
+                        try (DatagramSocket data = new DatagramSocket(PORT)) {
+                            int numberPackets = 0;
+                            while (!isCancelled()) {
+                                readData(tableView, queue, data, numberPackets);
+                            }
+                        } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                        return null;
+                    }
+                };
+            }
+        };
+
         Label delayLabel = new Label();
         delayLabel.setText("Задержка в потоке, мс ");
         TextField textField = new TextField();
@@ -134,6 +160,21 @@ public class TLMClient extends Application {
             }
         });
 
+        String goText = "▶ Поехали! ";
+        Button playButton = new Button(goText);
+        playButton.setMinWidth(100);
+        playButton.setOnAction(event -> {
+           if (service.isRunning()) {
+               service.cancel();
+               service.reset();
+               playButton.setText(goText);
+           } else {
+               tableView.setPlaceholder(new Label("Ждем данные от сервера..."));
+               service.start();
+               playButton.setText("■ Остановить!");
+           }
+        });
+
         Button delayButton = new Button("Применить");
         delayButton.setOnAction(event -> {
             delay = Integer.parseInt(textField.getText());
@@ -141,14 +182,23 @@ public class TLMClient extends Application {
             logView.getChildren().add(new Text("\n  " + LocalDateTime.now().format(customFormat) +
                     "  Delay: " + delay + " ms"));
         });
+
         HBox hbox = new HBox(0, delayLabel, textField, delayButton);
         hbox.setAlignment(Pos.CENTER_RIGHT);
+        HBox hbox1 = new HBox(0, playButton);
+        hbox1.setAlignment(Pos.CENTER_LEFT);
+
+        GridPane grid = new GridPane();
+        grid.add(hbox1, 0, 0);
+        grid.add(hbox,1,0);
+        GridPane.setHalignment(hbox, HPos.RIGHT);
+        GridPane.setHgrow(hbox, Priority.ALWAYS);
 
         tableView = new TableView();
         tableView.setMinWidth(WIDTH);
         tableView.setMinHeight(HEIGHT - 50);
 
-        tableView.setPlaceholder(new Label("Ждем данные от сервера..."));
+        tableView.setPlaceholder(new Label("Для получения данных нажмите кнопку \"Поехали!\""));
 
         TableColumn<PackageData, Long> column1 =
                 new TableColumn<>("Номер пакета");
@@ -215,23 +265,8 @@ public class TLMClient extends Application {
             }
         });
 
-        VBox vbox = new VBox(hbox, tableView);
+        VBox vbox = new VBox(grid, tableView);
         primaryStage.setScene(new Scene(vbox, WIDTH, HEIGHT));
-
-        service = new Service<>() {
-            @Override
-            protected Task<Void> createTask() {
-                return new Task<>() {
-                    @Override
-                    protected Void call() {
-                        readData(tableView);
-                        return null;
-                    }
-                };
-            }
-        };
-
-        service.start();
         primaryStage.setX(60);
         primaryStage.setY(20);
         primaryStage.setTitle("TLMClient");
@@ -260,14 +295,9 @@ public class TLMClient extends Application {
         }
     }
 
-    private void readData(TableView tableView) {
-        Queue<Byte> queue = new LinkedList<>();
-        byte[] marker = fromUnsignedInt(markerTLM);
+    private void readData(TableView tableView, Queue<Byte> queue, DatagramSocket data,
+                          int numberPackets) throws IOException {
 
-        try (DatagramSocket data = new DatagramSocket(PORT)) {
-            int numberPackets = 0;
-
-            while (true) {
                 byte[] commonBuffer = new byte[26];
 
                 byte[] buf = new byte[256];
@@ -431,13 +461,6 @@ public class TLMClient extends Application {
                         }
                     }
                 }
-            }
-
-        } catch (
-                IOException e) {
-            e.printStackTrace();
-        }
-
     }
 
     private void addData(ObservableList<XYChart.Data<String, Number>> dataTime, String formattedDate,
