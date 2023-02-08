@@ -196,7 +196,7 @@ public class TLMClient extends Application {
         alert.getButtonTypes().setAll(buttonYes, buttonCancel);
         alert.setHeaderText("Подтвердите действие");
         alert.setTitle("Завершение работы");
-        alert.setContentText(String.format("Вы действительно закрыть приложение?"));
+        alert.setContentText(String.format("Вы действительно хотите закрыть приложение?"));
         alert.initOwner(primaryStage.getOwner());
         Optional<ButtonType> res = alert.showAndWait();
 
