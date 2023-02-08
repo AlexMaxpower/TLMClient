@@ -234,27 +234,27 @@ public class ReadService extends Service<Void> {
         }
     }
 
-    private static byte[] fromUnsignedInt(long value) {
+    static byte[] fromUnsignedInt(long value) {
         byte[] bytes = new byte[8];
         ByteBuffer.wrap(bytes).putLong(value);
         return Arrays.copyOfRange(bytes, 4, 8);
     }
 
-    private static long toUnsignedInt(byte[] bytes) {
+    static long toUnsignedInt(byte[] bytes) {
         ByteBuffer buffer = ByteBuffer.allocate(8).put(new byte[]{0, 0, 0, 0}).put(bytes);
         buffer.position(0);
         return buffer.getLong();
     }
 
-    private static String byteArrayToHex(byte[] a) {
+    static String byteArrayToHex(byte[] a) {
         StringBuilder sb = new StringBuilder(a.length * 2);
         for (byte b : a) {
             sb.append(String.format("%02x", b));
         }
-        return sb.toString();
+        return sb.toString().toUpperCase();
     }
 
-    private static byte[] reverse(byte[] bytes) {
+    static byte[] reverse(byte[] bytes) {
         for (int i = 0; i < bytes.length / 2; i++) {
             byte tmp = bytes[i];
             bytes[i] = bytes[bytes.length - i - 1];
@@ -263,7 +263,7 @@ public class ReadService extends Service<Void> {
         return bytes;
     }
 
-    private static int crc16(byte[] data, int offset, int length) {
+    static int crc16(byte[] data, int offset, int length) {
         if (data == null || offset < 0 || offset > data.length - 1 || offset + length > data.length) {
             return 0;
         }
