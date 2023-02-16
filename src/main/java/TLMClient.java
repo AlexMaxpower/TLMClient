@@ -67,10 +67,18 @@ public class TLMClient extends Application {
         TextField textField = new TextField();
         textField.setPrefColumnCount(10);
         textField.setText(Integer.toString(delay));
+        Tooltip tooltip = new Tooltip();
+        String ttMessage = "Задержка в потоке\nдолжна быть целым числом\n";
+        tooltip.setText(ttMessage);
+        textField.setTooltip(tooltip);
+
         // в поле только цифры
         textField.textProperty().addListener((observable, oldValue, newValue) -> {
             if (!newValue.matches("\\d*")) {
                 textField.setText(newValue.replaceAll("[^\\d]", ""));
+                tooltip.setText("Здесь могут быть только цифры!");
+            } else {
+                tooltip.setText(ttMessage);
             }
         });
 
